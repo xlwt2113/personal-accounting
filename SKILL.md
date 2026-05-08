@@ -58,6 +58,10 @@ with open('output.txt', 'w', encoding='utf-8') as f:
 > 2. **禁止直接操作数据**：不得直接 INSERT/UPDATE/DELETE 数据，必须通过本技能定义的函数
 > 3. **账户名称唯一性**：同一数据库中账户名称不可重复
 > 4. **数据一致性**：所有操作必须保持数据完整性，不得绕过约束
+> 5. **时间格式强制统一**：
+>    - **所有收支记录和转账记录的日期/时间字段，必须使用 `YYYY-MM-DD HH:MM:SS` 格式（精确到秒）**
+>    - 如果用户未提供具体时间，自动以记录的创建时间（current_timestamp）作为交易时间
+>    - 禁止使用 `YYYY-MM-DD`、`YYYY-MM-DD HH:MM` 或其他任何不完整的时间格式
 
 ### 1. accounts 表（账户信息）
 
@@ -101,7 +105,7 @@ with open('output.txt', 'w', encoding='utf-8') as f:
 | account_id | INTEGER NOT NULL | 账户ID（外键） |
 | merchant | TEXT | 商家/商户名称 |
 | category | TEXT NOT NULL | 分类 |
-| transaction_date | TEXT NOT NULL | 交易日期（YYYY-MM-DD HH:MM，精确到分钟） |
+| transaction_date | TEXT NOT NULL | 交易日期（YYYY-MM-DD HH:MM:SS，精确到秒） |
 | note | TEXT | 备注信息 |
 | transfer_id | INTEGER | 关联转账ID（如果是由转账产生） |
 | created_at | TEXT | 创建时间 |
@@ -447,7 +451,7 @@ update_transaction(19, category='food', note='洛馍')
 | account_id | 账户ID |
 | merchant | 商家/商户 |
 | category | 分类 |
-| transaction_date | 交易日期（YYYY-MM-DD） |
+| transaction_date | 交易日期（YYYY-MM-DD HH:MM:SS） |
 | note | 备注 |
 
 ### 删除记录

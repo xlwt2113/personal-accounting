@@ -412,7 +412,7 @@ def add_transaction(amount: float, transaction_type: str, account_id: int,
         transaction_type: income 或 expense
         account_id: 账户ID
         category: 分类
-        transaction_date: 交易日期 YYYY-MM-DD HH:MM（精确到分钟）
+        transaction_date: 交易日期 YYYY-MM-DD HH:MM:SS（精确到秒），未提供则使用创建时间
         merchant: 商家
         note: 备注
         transfer_id: 转账关联ID
@@ -569,7 +569,7 @@ def add_transfer(from_account_id: int, to_account_id: int, amount: float,
         from_account_id: 转出账户ID
         to_account_id: 转入账户ID
         amount: 转账金额
-        transfer_time: 转账时间
+        transfer_time: 转账时间 YYYY-MM-DD HH:MM:SS，未提供则使用创建时间
         note: 备注
     
     Returns:
