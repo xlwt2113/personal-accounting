@@ -65,7 +65,7 @@ def parse_screenshot(image_path: str = None, source: str = None) -> Dict:
         'transaction_type': None,
         'merchant': None,
         'category': None,
-        'transaction_date': datetime.now().strftime('%Y-%m-%d'),
+        'transaction_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'note': None,
         'source': source,
         'confidence': 0,
@@ -250,7 +250,7 @@ def parse_and_save_transactions(parsed_records: list) -> dict:
             transaction_type=record['transaction_type'],
             account_id=account_id,
             category=record.get('category', 'other'),
-            transaction_date=record.get('transaction_date', datetime.now().strftime('%Y-%m-%d')),
+            transaction_date=record.get('transaction_date', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
             merchant=record.get('merchant'),
             note=record.get('note')
         )

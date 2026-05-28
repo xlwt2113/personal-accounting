@@ -12,7 +12,9 @@ from scripts.database import (
     get_accounts, get_transactions, get_transfers,
     get_total_by_type, get_total_by_category, get_total_by_account,
     get_daily_summary, get_monthly_summary, get_financial_summary,
-    get_account_transactions_with_transfers
+    get_account_transactions_with_transfers,
+    get_detailed_report, get_daily_report, get_weekly_report, get_monthly_detailed_report,
+    get_yearly_report
 )
 
 
@@ -101,42 +103,50 @@ def format_assets_report(data: Dict) -> str:
     # 净值格式化：正值显示为 +¥xxx，负值显示为 -¥xxx
     def fmt_net(v):
         return f"+¥{v:,.2f}" if v >= 0 else f"-¥{abs(v):,.2f}"
-    
+
     lines = []
-    lines.append("资产汇总报表")
+    lines.append("📊 财务汇总")
     lines.append("=" * 40)
-    lines.append(f"净资产: {format_currency(data['net_worth'])}")
-    lines.append(f"总资产: {format_currency(data['total_assets'])}")
-    lines.append(f"总负债: {format_currency(data['total_debt'])}")
+
+    # 一、净资产
+    lines.append("【净资产】")
+    lines.append(f"  总资产: {format_currency(data['total_assets'])}")
+    lines.append(f"  总负债: {format_currency(data['total_debt'])}")
+    lines.append(f"  净资产: {format_currency(data['net_worth'])}")
+
+    # 二、收支概况（本月 + 上月 + 环比）
+    cur = data['current_month']
+    last = data['last_month']
     lines.append("")
-    lines.append("本月收支:")
-    lines.append(f"  收入: {format_currency(data['current_month']['income'])}")
-    lines.append(f"  支出: {format_currency(data['current_month']['expense'])}")
-    lines.append(f"  净值: {fmt_net(data['current_month']['net'])}")
+    lines.append("【收支概况】")
+    lines.append(f"  本月收入: {format_currency(cur['income'])}    上月收入: {format_currency(last['income'])}")
+    lines.append(f"  本月支出: {format_currency(cur['expense'])}    上月支出: {format_currency(last['expense'])}")
+    lines.append(f"  本月结余: {fmt_net(cur['net'])}    上月结余: {fmt_net(last['net'])}")
+
+    # 三、资产账户
     lines.append("")
-    lines.append("上月收支:")
-    lines.append(f"  收入: {format_currency(data['last_month']['income'])}")
-    lines.append(f"  支出: {format_currency(data['last_month']['expense'])}")
-    lines.append(f"  净值: {fmt_net(data['last_month']['net'])}")
-    lines.append("")
-    lines.append("资产账户:")
+    lines.append("【资产账户】")
     for acc in data.get('asset_accounts', []):
-        lines.append(f"  {acc['name']}: {format_currency(acc['balance'])}")
-    lines.append("")
-    lines.append("信用卡欠款:")
-    for card in data.get('credit_accounts', []):
-        lines.append(f"  {card['name']}: 欠款 {format_currency(card['balance'])}, 额度 {format_currency(card['credit_limit'])}, 可用 {format_currency(card['available'])}")
-    
-    # 本月支出分类
+        type_name = get_account_type_name(acc.get('account_type', ''))
+        lines.append(f"  {acc['name']} ({type_name}): {format_currency(acc['balance'])}")
+
+    # 四、信用卡欠款
+    if data.get('credit_accounts'):
+        lines.append("")
+        lines.append("【信用卡】")
+        for card in data['credit_accounts']:
+            lines.append(f"  {card['name']}: 欠款 {format_currency(card['balance'])} / 额度 {format_currency(card['credit_limit'])} / 可用 {format_currency(card['available'])}")
+
+    # 五、本月支出分类
     if data.get('expense_by_category'):
         lines.append("")
-        lines.append("本月支出分类:")
+        lines.append("【本月支出分类】")
         total_exp = sum(c['total'] for c in data['expense_by_category'])
         for cat in data['expense_by_category']:
             pct = cat['total'] / total_exp * 100
             cat_name = CATEGORY_NAMES.get(cat['category'], cat['category'])
             lines.append(f"  {cat_name}: {format_currency(cat['total'])} ({pct:.0f}%)")
-    
+
     return '\n'.join(lines)
 
 
@@ -389,6 +399,136 @@ def get_category_report_text(transaction_type: str, date_from: str = None, date_
     """获取分类统计报表文本"""
     data = get_total_by_category(transaction_type, date_from, date_to)
     return format_report_text(data, 'category')
+
+
+# ==================== 日报/周报/月报格式化 ====================
+
+def format_detailed_report_text(data: Dict, report_type: str, show_details: bool = True) -> str:
+    """
+    格式化日报/周报/月报/年报为可读文本
+
+    Args:
+        data: get_detailed_report / get_daily_report / get_weekly_report / get_monthly_detailed_report / get_yearly_report 返回的数据
+        report_type: 'daily' / 'weekly' / 'monthly' / 'yearly'
+        show_details: 是否显示收入/支出明细（日报显示，周报/月报/年报不显示）
+
+    Returns:
+        格式化文本
+    """
+    type_names = {
+        'daily': '日报',
+        'weekly': '周报',
+        'monthly': '月报',
+        'yearly': '年报',
+    }
+    title = type_names.get(report_type, '报表')
+
+    lines = []
+    lines.append(f"📋 {title}")
+
+    # 日期范围
+    if report_type == 'daily':
+        lines.append(f"日期: {data['date_from'][:10]}")
+    elif report_type == 'weekly':
+        lines.append(f"周期: {data.get('week_start', data['date_from'][:10])} ~ {data.get('week_end', data['date_to'][:10])}")
+    elif report_type == 'monthly':
+        year = data.get('year', '')
+        month = data.get('month', '')
+        lines.append(f"周期: {year}年{month}月")
+    elif report_type == 'yearly':
+        year = data.get('year', '')
+        lines.append(f"周期: {year}年")
+
+    # 收支总览
+    income = data['income']
+    expense = data['expense']
+    net = income['total'] - expense['total']
+    net_str = f"+¥{net:,.2f}" if net >= 0 else f"-¥{abs(net):,.2f}"
+    lines.append("=" * 50)
+    lines.append(f"收入: {format_currency(income['total'])} ({income['count']}笔)")
+    lines.append(f"支出: {format_currency(expense['total'])} ({expense['count']}笔)")
+    lines.append(f"结余: {net_str}")
+
+    # 明细仅在日报中显示
+    if show_details:
+        # 支出明细
+        if expense['records']:
+            lines.append("")
+            lines.append("─" * 50)
+            lines.append("【支出明细】")
+            lines.append("─" * 50)
+            for t in expense['records']:
+                date = t['transaction_date']
+                cat_name = get_category_name(t['category'])
+                merchant = t['merchant'] or ''
+                desc = f"{cat_name}"
+                if merchant:
+                    desc = f"{merchant} · {desc}"
+                note = f" [{t['note']}]" if t.get('note') else ''
+                lines.append(f"  {date}  -¥{t['amount']:,.2f}  {desc}  ({t['account_name']}){note}")
+
+        # 收入明细
+        if income['records']:
+            lines.append("")
+            lines.append("─" * 50)
+            lines.append("【收入明细】")
+            lines.append("─" * 50)
+            for t in income['records']:
+                date = t['transaction_date']
+                cat_name = get_category_name(t['category'])
+                merchant = t['merchant'] or ''
+                desc = f"{cat_name}"
+                if merchant:
+                    desc = f"{merchant} · {desc}"
+                note = f" [{t['note']}]" if t.get('note') else ''
+                lines.append(f"  {date}  +¥{t['amount']:,.2f}  {desc}  ({t['account_name']}){note}")
+
+    # 支出按账户分组汇总
+    if expense['by_account']:
+        lines.append("")
+        lines.append("─" * 50)
+        lines.append("【支出 - 按账户汇总】")
+        lines.append("─" * 50)
+        for item in expense['by_account']:
+            pct = item['total'] / expense['total'] * 100 if expense['total'] > 0 else 0
+            lines.append(f"  {item['account_name']}: {format_currency(item['total'])} ({pct:.0f}%) - {item['count']}笔")
+
+    # 支出按分类分组汇总
+    if expense['by_category']:
+        lines.append("")
+        lines.append("─" * 50)
+        lines.append("【支出 - 按分类汇总】")
+        lines.append("─" * 50)
+        for item in expense['by_category']:
+            cat_name = get_category_name(item['category'])
+            pct = item['total'] / expense['total'] * 100 if expense['total'] > 0 else 0
+            lines.append(f"  {cat_name}: {format_currency(item['total'])} ({pct:.0f}%) - {item['count']}笔")
+
+    return '\n'.join(lines)
+
+
+def get_daily_report_text(target_date: str = None) -> str:
+    """获取日报文本（含明细）"""
+    data = get_daily_report(target_date)
+    return format_detailed_report_text(data, 'daily', show_details=True)
+
+
+def get_weekly_report_text() -> str:
+    """获取周报文本（不含明细，仅汇总）"""
+    data = get_weekly_report()
+    return format_detailed_report_text(data, 'weekly', show_details=False)
+
+
+def get_monthly_detailed_report_text(year: int = None, month: int = None) -> str:
+    """获取月报文本（不含明细，仅汇总）"""
+    data = get_monthly_detailed_report(year, month)
+    return format_detailed_report_text(data, 'monthly', show_details=False)
+
+
+def get_yearly_report_text(year: int = None) -> str:
+    """获取年报文本（不含明细，仅汇总）"""
+    data = get_yearly_report(year)
+    return format_detailed_report_text(data, 'yearly', show_details=False)
 
 
 if __name__ == '__main__':

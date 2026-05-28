@@ -2,16 +2,71 @@
 
 智能个人记账系统，支持账单图片解析、手动录入、账户管理、转账记录和统计分析。
 
+## 触发条件
+
+当用户消息包含以下关键词时自动触发此技能：记账、记一笔、记录、花了、消费、买了、付款、支付、转账、日报、周报、月报、年报、财务汇总、统计、汇总、账户、余额、账单、流水、收支、收入、支出、信用卡、储蓄卡、微信、支付宝、现金、分类统计、商家统计。
+
 ## Agent 使用规范（重要）
 
-**查询 SQLite 数据库时，永远用脚本文件，不使用 `python -c` 单行命令**
+### 执行方式优先级（强制执行）
 
-原因：`python -c "import ..."` 会被 gateway 判定为 obfuscated 代码而直接拒绝，不会触发审批流程，导致命令超时失败。
+**CRITICAL：所有操作必须优先使用技能内置函数。禁止 Agent 自己创建脚本执行查询或统计操作，除非技能中确实没有相应的功能。**
+
+| 优先级 | 方式 | 说明 |
+|--------|------|------|
+| **1（首选）** | 使用内置 `get_xxx_text()` 函数 | 所有查询和统计操作都有对应的内置函数，直接调用即可 |
+| **2（备选）** | 编写临时脚本调用内置函数 | 仅当需要组合多个函数、或需要特殊参数格式时使用 |
+| **3（最后手段）** | 编写临时脚本直接查询 | 仅当内置函数完全不满足需求时才允许，且必须用完后删除 |
+
+### 内置函数速查表
+
+**查询/报表类（直接调用，返回格式化文本）：**
+
+| 用户意图 | 调用函数 | 返回内容 |
+|----------|----------|----------|
+| 财务汇总 | `get_assets_report_text()` | 净资产、收支概况、资产账户、信用卡、支出分类 |
+| 日报 | `get_daily_report_text()` | 当日收支总览 + 明细 + 汇总 |
+| 周报 | `get_weekly_report_text()` | 本周收支总览 + 汇总 |
+| 月报 | `get_monthly_detailed_report_text()` | 本月收支总览 + 汇总 |
+| 年报 | `get_yearly_report_text()` | 本年收支总览 + 汇总 |
+| 月度对比 | `get_monthly_report_text()` | 多个月份的收支对比 |
+| 分类统计 | `get_category_report_text()` | 按分类汇总收支 |
+| 账户余额 | `get_account_balance_report_text()` | 所有账户余额列表 |
+| 账户流水 | `get_account_detail_report_text(account_id)` | 指定账户的所有交易明细 |
+| 所有交易 | `get_transactions()` + `format_transactions_report()` | 交易记录列表 |
+| 所有转账 | `get_transfers()` + `format_transfers_report()` | 转账记录列表 |
+
+**写入/修改类（直接调用 database.py 函数）：**
+
+| 用户意图 | 调用函数 |
+|----------|----------|
+| 添加账户 | `add_account(name, account_type, ...)` |
+| 查看账户 | `get_accounts()` |
+| 添加交易 | `add_transaction(amount, transaction_type, account_id, ...)` |
+| 添加转账 | `add_transfer(from_account_id, to_account_id, amount, ...)` |
+| 更新交易 | `update_transaction(transaction_id, **kwargs)` |
+| 删除交易 | `delete_transaction(transaction_id)` |
+| 图片解析 | `parse_and_save_transactions(records)` |
+
+**所有内置函数位于：**
+- `scripts/statistics.py` — 统计报表和格式化函数
+- `scripts/database.py` — 数据库操作函数
+- `scripts/parser.py` — 账单图片解析函数
+
+### 临时脚本规范（仅在必要时使用）
+
+**仅在技能内置函数确实无法满足需求时，才允许创建临时脚本。创建时必须遵守：**
+
+1. **临时脚本写在工作区根目录下**（`{workspace}/`），不要写在技能目录里。技能目录是代码库，不应被临时文件污染。
+2. **使用有意义的文件名**，如 `_query_daily_report.py`、`_add_transaction.py`，前缀 `_` 表示临时文件。
+3. **执行完毕后立即删除临时脚本**，不要让临时文件残留。如果生成了输出文件（如 `output.txt`），读完后也一并删除。
+4. **禁止直接写 SQL 查询**：临时脚本中也必须通过 `database.py` 中的函数操作数据，不得直接使用 `sqlite3` 写 SQL。
 
 正确方式：
 ```bash
-# 1. 写一个 .py 脚本文件（如 query_accounts.py）
-# 2. 执行: python query_accounts.py
+# 1. 在 workspace 根目录写一个 .py 脚本（如 _query_accounts.py）
+# 2. 执行: python _query_accounts.py
+# 3. 执行完毕后删除: del _query_accounts.py（Windows）/ rm _query_accounts.py（Linux）
 ```
 
 **中文输出编码处理**
@@ -33,11 +88,11 @@ with open('output.txt', 'w', encoding='utf-8') as f:
     f.write(f"账户名称: {name}\n")
 ```
 
-数据库路径（Windows）：
+数据库路径：
 ```
 {技能目录}\db\accounting.db
-即：C:\Users\wt\.openclaw\workspace\skills\personal-accounting\db\accounting.db
 ```
+> 路径由 `database.py` 中的 `DB_PATH` 自动计算，无需手动指定。
 
 ---
 
@@ -245,7 +300,11 @@ with open('output.txt', 'w', encoding='utf-8') as f:
 - 📊 查看所有账户及余额
 
 ### 5. 统计汇总
-- 📅 日报/周报/月报/年报
+- 📊 **财务汇总**：所有账户汇总、收支汇总、净资产、本月及上月收支对比
+- 📋 **日报**：当日所有支出/收入明细分开显示，支出按账户和分类分组汇总
+- 📅 **周报**：本周（周一~周日）所有支出/收入明细，支出按账户和分类分组汇总
+- 🗓️ **月报**：本月所有支出/收入明细，支出按账户和分类分组汇总
+- 🗓️ **年报**：本年所有支出/收入明细，支出按账户和分类分组汇总
 - 📂 按分类统计收支
 - 🏪 按商家统计收支（收入/支出分别统计）
 - 🏦 按账户统计
@@ -315,6 +374,22 @@ with open('output.txt', 'w', encoding='utf-8') as f:
 用户: 查看所有账户余额
 → 返回：所有账户名称、类型、余额列表
 
+用户: 财务汇总
+→ 调用 get_financial_summary() → format_assets_report()
+→ 返回：净资产、总资产/总负债、本月/上月收支对比、资产账户列表、信用卡欠款、本月支出分类
+
+用户: 日报 / 今天花了多少钱
+→ 调用 get_daily_report_text()
+→ 返回：当日收支总览、支出明细、收入明细、支出按账户汇总、支出按分类汇总
+
+用户: 周报 / 这周花了多少
+→ 调用 get_weekly_report_text()
+→ 返回：本周（周一~周日）收支总览、支出明细、收入明细、支出按账户汇总、支出按分类汇总
+
+用户: 月报 / 这个月花了多少
+→ 调用 get_monthly_detailed_report_text()
+→ 返回：本月收支总览、支出明细、收入明细、支出按账户汇总、支出按分类汇总
+
 用户: 查看本月支出统计
 → 返回：本月支出总额、各分类支出占比
 
@@ -332,22 +407,25 @@ with open('output.txt', 'w', encoding='utf-8') as f:
 用户: 财务汇总
 ```
 
-财务汇总**必须**按以下格式分组显示：
+财务汇总**必须**调用 `get_financial_summary()` 获取数据，用 `format_assets_report()` 格式化输出，按以下结构显示：
 
-**净资产**
+**【净资产】**
 - 总资产、总负债、净资产
 
-**收支概况**
-- 当月收入/支出/净值（正数显示为 +¥xxx，负数显示为 -¥xxx）
-- 上月收入/支出/净值
+**【收支概况】**
+- 本月收入、本月支出、本月结余（正数显示 +¥xxx，负数显示 -¥xxx）
+- 上月收入、上月支出、上月结余
 
-**资产账户**（储蓄卡、微信、支付宝、现金、股票、基金）
-- 每行显示：账户名 | 类型 | 余额
+**【资产账户】**（储蓄卡、微信、支付宝、现金、股票、基金）
+- 每行显示：账户名 (类型): 余额
 
-**信用卡欠款**（独立分组）
-- 每行显示：账户名 | 欠款 | 额度 | 可用额度
-- 欠款 = initial_balance + 累计支出 - 累计收入
+**【信用卡】**（独立分组）
+- 每行显示：账户名: 欠款 / 额度 / 可用额度
+- 欠款 = |initial_balance + 累计支出 - 累计收入|
 - 可用额度 = 固定额度 - 欠款
+
+**【本月支出分类】**
+- 每行显示：分类名: 金额 (百分比)
 
 ---
 
@@ -363,7 +441,8 @@ with open('output.txt', 'w', encoding='utf-8') as f:
 
 ```
 {技能目录}\db\accounting.db
-即：C:\Users\wt\.openclaw\workspace\skills\personal-accounting\db\accounting.db
+```
+> 路径由 `database.py` 中的 `DB_PATH` 自动计算，无需手动指定。
 ```
 
 ---
@@ -472,5 +551,5 @@ delete_transaction(20)
 | 账户不存在 | 指定的账户ID或名称不存在 | 先创建账户或检查名称 |
 | 余额不足 | 转账金额超过转出账户余额 | 检查账户余额 |
 | 无效金额 | 金额为负数或非数字 | 输入正确的金额 |
-| 无效日期 | 日期格式不正确 | 使用 YYYY-MM-DD 格式 |
+| 无效日期 | 日期格式不正确 | 使用 YYYY-MM-DD HH:MM:SS 格式 |
 | 账户类型错误 | 无效的账户类型 | 检查类型值 |

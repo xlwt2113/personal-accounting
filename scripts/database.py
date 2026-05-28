@@ -84,6 +84,17 @@ def get_or_create_account(name: str, account_type: str, initial_balance: float =
     return account_id, True
 
 
+def _normalize_account_type(account_type: str) -> str:
+    """将简写的账户类型统一为标准值"""
+    type_map = {
+        'savings': 'savings_card',
+        'savings_card': 'savings_card',
+        'credit': 'credit_card',
+        'credit_card': 'credit_card',
+    }
+    return type_map.get(account_type, account_type)
+
+
 def get_or_create_account_from_parser(account_info: Dict) -> Tuple[int, bool]:
     """
     根据解析结果获取或创建账户（支持自动识别银行卡命名）
@@ -100,16 +111,19 @@ def get_or_create_account_from_parser(account_info: Dict) -> Tuple[int, bool]:
         - bank_sms: 银行卡
     """
     name = None
-    account_type = 'savings'
+    account_type = 'savings_card'
 
     # 银行卡处理
     if account_info.get('bank_name') and account_info.get('card_last_four'):
+        # 兼容传入的 account_type 可能是 'savings'/'savings_card' 或 'credit'/'credit_card'
+        raw_type = account_info.get('account_type', 'savings_card')
+        normalized_type = _normalize_account_type(raw_type)
         name = format_bank_account_name(
             account_info['bank_name'],
             account_info['card_last_four'],
-            account_info.get('account_type', 'savings')
+            normalized_type
         )
-        account_type = account_info.get('account_type', 'savings')
+        account_type = normalized_type
     # 微信零钱
     elif account_info.get('source') == 'wechat':
         name = '微信零钱'
@@ -129,7 +143,7 @@ def get_or_create_account_from_parser(account_info: Dict) -> Tuple[int, bool]:
     # 直接指定名称
     elif 'name' in account_info:
         name = account_info['name']
-        account_type = account_info.get('account_type', 'savings')
+        account_type = _normalize_account_type(account_info.get('account_type', 'savings_card'))
     else:
         raise ValueError("无法确定账户名称，请提供 bank_name+card_last_four 或 source 或 name")
 
@@ -223,6 +237,9 @@ def add_account(name: str, account_type: str, initial_balance: float = 0, credit
     Raises:
         ValueError: 账户名称已存在时抛出异常
     """
+    # 统一账户类型为标准值
+    account_type = _normalize_account_type(account_type)
+
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -1072,6 +1089,203 @@ def get_financial_summary() -> Dict:
         'credit_accounts': credit_accounts,
         'expense_by_category': [dict(row) for row in expense_by_category]
     }
+
+
+def get_detailed_report(date_from: str, date_to: str) -> Dict:
+    """
+    获取指定日期范围内的详细报表数据（用于日报/周报/月报）
+
+    Args:
+        date_from: 开始日期（YYYY-MM-DD 格式，自动补全为当天00:00:00）
+        date_to: 结束日期（YYYY-MM-DD 格式，自动补全为当天23:59:59）
+
+    Returns:
+        {
+            'date_from': str,
+            'date_to': str,
+            'income': {
+                'total': float,
+                'count': int,
+                'records': List[Dict]  # 收入明细列表
+            },
+            'expense': {
+                'total': float,
+                'count': int,
+                'records': List[Dict],      # 支出明细列表
+                'by_account': List[Dict],   # 按账户分组汇总
+                'by_category': List[Dict]   # 按分类分组汇总
+            }
+        }
+    """
+    # 确保日期范围覆盖整天
+    if len(date_from) == 10:
+        date_from = date_from + " 00:00:00"
+    if len(date_to) == 10:
+        date_to = date_to + " 23:59:59"
+
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    # 查询收入记录
+    cursor.execute("""
+        SELECT t.id, t.amount, t.account_id, a.name as account_name,
+               t.merchant, t.category, t.transaction_date, t.note
+        FROM transactions t
+        JOIN accounts a ON t.account_id = a.id
+        WHERE t.transaction_type = 'income'
+          AND t.transaction_date >= ?
+          AND t.transaction_date <= ?
+        ORDER BY t.transaction_date DESC, t.id DESC
+    """, (date_from, date_to))
+    income_records = [dict(row) for row in cursor.fetchall()]
+
+    # 查询支出记录
+    cursor.execute("""
+        SELECT t.id, t.amount, t.account_id, a.name as account_name,
+               t.merchant, t.category, t.transaction_date, t.note
+        FROM transactions t
+        JOIN accounts a ON t.account_id = a.id
+        WHERE t.transaction_type = 'expense'
+          AND t.transaction_date >= ?
+          AND t.transaction_date <= ?
+        ORDER BY t.transaction_date DESC, t.id DESC
+    """, (date_from, date_to))
+    expense_records = [dict(row) for row in cursor.fetchall()]
+
+    # 支出按账户分组汇总
+    cursor.execute("""
+        SELECT a.name as account_name, SUM(t.amount) as total, COUNT(*) as count
+        FROM transactions t
+        JOIN accounts a ON t.account_id = a.id
+        WHERE t.transaction_type = 'expense'
+          AND t.transaction_date >= ?
+          AND t.transaction_date <= ?
+        GROUP BY t.account_id
+        ORDER BY total DESC
+    """, (date_from, date_to))
+    expense_by_account = [dict(row) for row in cursor.fetchall()]
+
+    # 支出按分类分组汇总
+    cursor.execute("""
+        SELECT category, SUM(amount) as total, COUNT(*) as count
+        FROM transactions
+        WHERE transaction_type = 'expense'
+          AND transaction_date >= ?
+          AND transaction_date <= ?
+        GROUP BY category
+        ORDER BY total DESC
+    """, (date_from, date_to))
+    expense_by_category = [dict(row) for row in cursor.fetchall()]
+
+    conn.close()
+
+    income_total = sum(r['amount'] for r in income_records)
+    expense_total = sum(r['amount'] for r in expense_records)
+
+    return {
+        'date_from': date_from,
+        'date_to': date_to,
+        'income': {
+            'total': round(income_total, 2),
+            'count': len(income_records),
+            'records': income_records
+        },
+        'expense': {
+            'total': round(expense_total, 2),
+            'count': len(expense_records),
+            'records': expense_records,
+            'by_account': [{'account_name': r['account_name'], 'total': round(r['total'], 2), 'count': r['count']} for r in expense_by_account],
+            'by_category': [{'category': r['category'], 'total': round(r['total'], 2), 'count': r['count']} for r in expense_by_category]
+        }
+    }
+
+
+def get_daily_report(target_date: str = None) -> Dict:
+    """
+    获取日报数据
+
+    Args:
+        target_date: 目标日期 YYYY-MM-DD，不传则使用今天
+
+    Returns:
+        get_detailed_report 的结果
+    """
+    if target_date is None:
+        target_date = datetime.now(CST).strftime('%Y-%m-%d')
+    return get_detailed_report(target_date, target_date)
+
+
+def get_weekly_report() -> Dict:
+    """
+    获取本周报数据（周一到周日）
+
+    Returns:
+        get_detailed_report 的结果，额外包含 week_start 和 week_end 字段
+    """
+    now = datetime.now(CST)
+    # 计算本周一
+    weekday = now.weekday()  # 0=周一, 6=周日
+    monday = now - timedelta(days=weekday)
+    sunday = monday + timedelta(days=6)
+
+    week_start = monday.strftime('%Y-%m-%d')
+    week_end = sunday.strftime('%Y-%m-%d')
+
+    result = get_detailed_report(week_start, week_end)
+    result['week_start'] = week_start
+    result['week_end'] = week_end
+    return result
+
+
+def get_monthly_detailed_report(year: int = None, month: int = None) -> Dict:
+    """
+    获取月报数据（含明细）
+
+    Args:
+        year: 年份，默认今年
+        month: 月份，默认本月
+
+    Returns:
+        get_detailed_report 的结果，额外包含 year 和 month 字段
+    """
+    now = datetime.now(CST)
+    if year is None:
+        year = now.year
+    if month is None:
+        month = now.month
+
+    month_start = f"{year}-{month:02d}-01"
+    if month == 12:
+        month_end = f"{year + 1}-01-01"
+    else:
+        month_end = f"{year}-{month + 1:02d}-01"
+
+    result = get_detailed_report(month_start, month_end)
+    result['year'] = year
+    result['month'] = month
+    return result
+
+
+def get_yearly_report(year: int = None) -> Dict:
+    """
+    获取年报数据（含明细）
+
+    Args:
+        year: 年份，默认今年
+
+    Returns:
+        get_detailed_report 的结果，额外包含 year 字段
+    """
+    if year is None:
+        year = datetime.now(CST).year
+
+    year_start = f"{year}-01-01"
+    year_end = f"{year}-12-31"
+
+    result = get_detailed_report(year_start, year_end)
+    result['year'] = year
+    return result
 
 
 if __name__ == '__main__':

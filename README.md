@@ -11,19 +11,19 @@ personal-accounting/
 ├── scripts/
 │   ├── __init__.py            # 包初始化
 │   ├── database.py            # 核心数据库操作模块
-│   ├── parser.py               # 账单图片解析模块
-│   ├── daily_report.py         # 日报统计
-│   ├── daily_summary.py        # 日汇总
-│   ├── financial_summary.py    # 财务汇总
-│   ├── statistics.py           # 统计分析
-│   └── examples/               # 示例脚本
+│   ├── parser.py              # 账单图片解析模块
+│   ├── statistics.py          # 统计分析 & 报表格式化
+│   └── examples/              # 示例脚本
 │       ├── add_accounts.py
 │       ├── add_transactions.py
 │       ├── add_transfers.py
-│       ├── query_*.py
+│       ├── query_accounts.py
+│       ├── query_account_detail.py
+│       ├── query_monthly.py
+│       ├── query_transfers.py
 │       └── statistics_demo.py
-├── README.md                   # 本文件
-└── SKILL.md                    # 详细技能文档
+├── README.md                  # 本文件
+└── SKILL.md                   # 详细技能文档
 ```
 
 ---
@@ -32,12 +32,11 @@ personal-accounting/
 
 ### 数据库路径
 
-```python
-# Windows
-db_path = r"C:\Users\wt\.openclaw\workspace\skills\personal-accounting\db\accounting.db"
+数据库路径由 `database.py` 中的 `DB_PATH` 自动计算，无需手动指定：
 
-# macOS/Linux
-db_path = "/Users/wt/.openclaw/plugin-skills/personal-accounting/db/accounting.db"
+```python
+from scripts.database import DB_PATH
+print(DB_PATH)
 ```
 
 ### 编码处理（Windows）
@@ -130,7 +129,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 | account_id | INTEGER | 账户ID |
 | merchant | TEXT | 商家 |
 | category | TEXT | 分类 |
-| transaction_date | TEXT | 交易时间 |
+| transaction_date | TEXT | 交易时间 (YYYY-MM-DD HH:MM:SS) |
 | note | TEXT | 备注 |
 | transfer_id | INTEGER | 关联转账ID |
 | created_at | TEXT | 创建时间 |
@@ -179,7 +178,7 @@ add_transaction(
     account_id=account_id,
     merchant='麦当劳',
     category='food',
-    transaction_date='2024-01-15 12:30'
+    transaction_date='2024-01-15 12:30:00'
 )
 ```
 
