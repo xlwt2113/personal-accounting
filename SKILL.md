@@ -8,85 +8,66 @@
 
 ## Agent 使用规范（重要）
 
-### 执行方式优先级（强制执行）
+### 唯一执行方式：CLI 统一入口（强制执行）
 
-**CRITICAL：所有操作必须优先使用技能内置函数。禁止 Agent 自己创建脚本执行查询或统计操作，除非技能中确实没有相应的功能。**
+**CRITICAL：所有操作必须通过 `scripts/cli.py` 命令行执行。禁止 Agent 自己创建临时脚本，也禁止使用 `python -c`。**
 
-| 优先级 | 方式 | 说明 |
-|--------|------|------|
-| **1（首选）** | 使用内置 `get_xxx_text()` 函数 | 所有查询和统计操作都有对应的内置函数，直接调用即可 |
-| **2（备选）** | 编写临时脚本调用内置函数 | 仅当需要组合多个函数、或需要特殊参数格式时使用 |
-| **3（最后手段）** | 编写临时脚本直接查询 | 仅当内置函数完全不满足需求时才允许，且必须用完后删除 |
+技能目录下有现成的 examples 演示脚本，但它们是**演示用途（硬编码参数）**，不应直接执行。所有操作统一通过 CLI 入口：
 
-### 内置函数速查表
-
-**查询/报表类（直接调用，返回格式化文本）：**
-
-| 用户意图 | 调用函数 | 返回内容 |
-|----------|----------|----------|
-| 财务汇总 | `get_assets_report_text()` | 净资产、收支概况、资产账户、信用卡、支出分类 |
-| 日报 | `get_daily_report_text()` | 当日收支总览 + 明细 + 汇总 |
-| 周报 | `get_weekly_report_text()` | 本周收支总览 + 汇总 |
-| 月报 | `get_monthly_detailed_report_text()` | 本月收支总览 + 汇总 |
-| 年报 | `get_yearly_report_text()` | 本年收支总览 + 汇总 |
-| 月度对比 | `get_monthly_report_text()` | 多个月份的收支对比 |
-| 分类统计 | `get_category_report_text()` | 按分类汇总收支 |
-| 账户余额 | `get_account_balance_report_text()` | 所有账户余额列表 |
-| 账户流水 | `get_account_detail_report_text(account_id)` | 指定账户的所有交易明细 |
-| 所有交易 | `get_transactions()` + `format_transactions_report()` | 交易记录列表 |
-| 所有转账 | `get_transfers()` + `format_transfers_report()` | 转账记录列表 |
-
-**写入/修改类（直接调用 database.py 函数）：**
-
-| 用户意图 | 调用函数 |
-|----------|----------|
-| 添加账户 | `add_account(name, account_type, ...)` |
-| 查看账户 | `get_accounts()` |
-| 添加交易 | `add_transaction(amount, transaction_type, account_id, ...)` |
-| 添加转账 | `add_transfer(from_account_id, to_account_id, amount, ...)` |
-| 更新交易 | `update_transaction(transaction_id, **kwargs)` |
-| 删除交易 | `delete_transaction(transaction_id)` |
-| 图片解析 | `parse_and_save_transactions(records)` |
-
-**所有内置函数位于：**
-- `scripts/statistics.py` — 统计报表和格式化函数
-- `scripts/database.py` — 数据库操作函数
-- `scripts/parser.py` — 账单图片解析函数
-
-### 临时脚本规范（仅在必要时使用）
-
-**仅在技能内置函数确实无法满足需求时，才允许创建临时脚本。创建时必须遵守：**
-
-1. **临时脚本写在工作区根目录下**（`{workspace}/`），不要写在技能目录里。技能目录是代码库，不应被临时文件污染。
-2. **使用有意义的文件名**，如 `_query_daily_report.py`、`_add_transaction.py`，前缀 `_` 表示临时文件。
-3. **执行完毕后立即删除临时脚本**，不要让临时文件残留。如果生成了输出文件（如 `output.txt`），读完后也一并删除。
-4. **禁止直接写 SQL 查询**：临时脚本中也必须通过 `database.py` 中的函数操作数据，不得直接使用 `sqlite3` 写 SQL。
-
-正确方式：
 ```bash
-# 1. 在 workspace 根目录写一个 .py 脚本（如 _query_accounts.py）
-# 2. 执行: python _query_accounts.py
-# 3. 执行完毕后删除: del _query_accounts.py（Windows）/ rm _query_accounts.py（Linux）
+cd {技能目录}/scripts && python cli.py <命令> [参数...]
 ```
 
-**中文输出编码处理**
-Windows 控制台默认 GBK 编码，直接 print 中文会乱码。务必在脚本开头添加：
-```python
-import sys
-sys.stdout.reconfigure(encoding='utf-8')
-```
-或使用写入文件方式（见下方示例）。
+### CLI 命令速查表
 
-```python
-# 方式1: 重新配置 stdout（推荐）
-import sys
-sys.stdout.reconfigure(encoding='utf-8')
-print("中文输出测试")
+**查询/报表类（直接输出格式化文本）：**
 
-# 方式2: 写入文件再读取
-with open('output.txt', 'w', encoding='utf-8') as f:
-    f.write(f"账户名称: {name}\n")
+| 用户意图 | CLI 命令 |
+|----------|----------|
+| 日报 | `python cli.py report daily` |
+| 周报 | `python cli.py report weekly` |
+| 月报 | `python cli.py report monthly` |
+| 月报（指定年月） | `python cli.py report monthly --year 2024 --month 3` |
+| 年报 | `python cli.py report yearly` |
+| 年报（指定年） | `python cli.py report yearly --year 2024` |
+| 财务汇总 | `python cli.py summary` |
+| 账户列表 | `python cli.py accounts` |
+| 账户流水 | `python cli.py account-detail <账户ID>` |
+| 支出分类统计 | `python cli.py categories expense` |
+| 收入分类统计 | `python cli.py categories income` |
+| 交易记录列表 | `python cli.py transactions` |
+| 交易记录（按账户） | `python cli.py transactions --account-id <ID>` |
+| 转账记录列表 | `python cli.py transfers` |
+
+**写入/修改类（推荐使用 --file 方式避免 PowerShell 转义问题）：**
+
+| 用户意图 | CLI 命令 |
+|----------|----------|
+| 添加账户 | `python cli.py add-account --file _data.json` |
+| 添加交易 | `python cli.py add-transaction --file _data.json` |
+| 添加转账 | `python cli.py add-transfer --file _data.json` |
+| 更新交易 | `python cli.py update-transaction <交易ID> --file _data.json` |
+| 删除交易 | `python cli.py delete-transaction <交易ID>` |
+
+**写入操作执行流程（Agent 必须遵循）：**
+
+1. 在 workspace 根目录写一个 `_data.json` 文件，内容为 JSON 格式的参数
+2. 执行 CLI 命令：`cd {技能目录}/scripts && python cli.py <命令> --file {workspace}/_data.json`
+3. 执行完毕后删除 `_data.json`
+
+示例 `_data.json` 内容：
+```json
+{"amount": 45.5, "transaction_type": "expense", "account_id": 1, "category": "food", "merchant": "麦当劳", "transaction_date": "2026-05-28", "note": "午餐"}
 ```
+
+**注意事项：**
+- CLI 脚本会自动 `init_database()`，无需手动初始化
+- CLI 脚本已处理中文编码（UTF-8），无需额外设置
+- 写入命令返回 JSON 格式结果（含 `success` 字段）
+- 查询命令直接输出格式化的中文文本
+- **不要用 `python -c`**（会被 gateway 拦截）
+- **不要自己写临时脚本**（CLI 已覆盖所有操作）
+- 如果 CLI 不支持某个操作，说明该功能确实不存在，此时才需要先补充 `cli.py` 再执行
 
 数据库路径：
 ```
@@ -420,6 +401,8 @@ with open('output.txt', 'w', encoding='utf-8') as f:
 - 每行显示：账户名 (类型): 余额
 
 **【信用卡】**（独立分组）
+- **每张信用卡独立显示一行**，不得合并或归入"其他"
+- 即使欠款为 ¥0.00（如已还清的卡）也必须显示，不能省略
 - 每行显示：账户名: 欠款 / 额度 / 可用额度
 - 欠款 = |initial_balance + 累计支出 - 累计收入|
 - 可用额度 = 固定额度 - 欠款
