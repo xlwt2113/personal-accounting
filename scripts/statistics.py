@@ -20,20 +20,24 @@ from scripts.database import (
 
 # 分类中文名称映射
 CATEGORY_NAMES = {
+    # 支出分类
     'food': '餐饮',
     'transportation': '交通',
     'shopping': '购物',
     'entertainment': '娱乐',
     'bills': '账单',
     'healthcare': '医疗',
+    'social': '人情往来',
     'education': '教育',
     'housing': '住房',
     'investment': '投资理财',
+    # 收入分类
     'salary': '工资',
     'bonus': '奖金',
     'gift': '礼金红包',
     'refund': '退款',
     'transfer': '转账',
+    # 通用
     'other': '其他',
 }
 
@@ -124,28 +128,35 @@ def format_assets_report(data: Dict) -> str:
     lines.append(f"  本月结余: {fmt_net(cur['net'])}    上月结余: {fmt_net(last['net'])}")
 
     # 三、资产账户
-    lines.append("")
-    lines.append("【资产账户】")
-    for acc in data.get('asset_accounts', []):
-        type_name = get_account_type_name(acc.get('account_type', ''))
-        lines.append(f"  {acc['name']} ({type_name}): {format_currency(acc['balance'])}")
+    if data.get('asset_accounts'):
+        lines.append("")
+        lines.append("【资产账户】")
+        lines.append("| 账户 | 类型 | 余额 |")
+        lines.append("|------|------|")
+        for acc in data.get('asset_accounts', []):
+            type_name = get_account_type_name(acc.get('account_type', ''))
+            lines.append(f"| {acc['name']} | {type_name} | {format_currency(acc['balance'])} |")
 
     # 四、信用卡欠款
     if data.get('credit_accounts'):
         lines.append("")
         lines.append("【信用卡】")
+        lines.append("| 银行 | 欠款 | 额度 | 可用 |")
+        lines.append("|------|------|------|")
         for card in data['credit_accounts']:
-            lines.append(f"  {card['name']}: 欠款 {format_currency(card['balance'])} / 额度 {format_currency(card['credit_limit'])} / 可用 {format_currency(card['available'])}")
+            lines.append(f"| {card['name']} | {format_currency(card['balance'])} | {format_currency(card['credit_limit'])} | {format_currency(card['available'])} |")
 
     # 五、本月支出分类
     if data.get('expense_by_category'):
         lines.append("")
         lines.append("【本月支出分类】")
+        lines.append("| 分类 | 金额 | 占比 |")
+        lines.append("|------|------|")
         total_exp = sum(c['total'] for c in data['expense_by_category'])
         for cat in data['expense_by_category']:
             pct = cat['total'] / total_exp * 100
             cat_name = CATEGORY_NAMES.get(cat['category'], cat['category'])
-            lines.append(f"  {cat_name}: {format_currency(cat['total'])} ({pct:.0f}%)")
+            lines.append(f"| {cat_name} | {format_currency(cat['total'])} | {pct:.0f}% |")
 
     return '\n'.join(lines)
 

@@ -455,9 +455,10 @@ def add_transaction(amount: float, transaction_type: str, account_id: int,
     # 强制校验：order_no 必填
     if not order_no or (isinstance(order_no, str) and order_no.strip() == ''):
         raise ValueError(
-            '订单号(order_no)不能为空。图片识别时必须提取支付宝"订单号"或微信"交易单号"；'
+            '订单号(order_no)不能为空。图片识别时必须提取以下字段之一：'
+            '支付宝"订单号"、微信"交易单号"、微信"转账单号"；'
             '文字/语音录入时使用当前时间戳(YYYYMMDDHHmmss格式)。'
-            '如果图片中无此字段，请提示用户："图片信息不完整，请提供包含订单号/交易单号的完整截图"，并拒绝入库。'
+            '如果图片中无上述任何字段，请提示用户："图片信息不完整，请提供包含订单号/交易单号/转账单号的完整截图"，并拒绝入库。'
         )
 
     order_no = order_no.strip()
