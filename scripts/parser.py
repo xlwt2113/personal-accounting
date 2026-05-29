@@ -31,7 +31,7 @@ INCOME_KEYWORDS = {
 # 商家类型识别
 MERCHANT_PATTERNS = {
     'wechat': ['微信支付', '微信红包', '微信转账'],
-    'alipay': ['支付宝', '蚂蚁集团'],
+    'alipay': ['支付宝', '蚂蚁集团', '余额宝'],
     'bank': ['工商银行', '建设银行', '农业银行', '中国银行', '招商银行', '交通银行', '邮储银行'],
 }
 
@@ -114,7 +114,7 @@ def recognize_source(text: str) -> str:
     
     if '微信' in text:
         return 'wechat'
-    elif '支付宝' in text:
+    elif '支付宝' in text or '余额宝' in text:
         return 'alipay'
     elif any(bank in text for bank in ['银行', '卡号', '账户']):
         return 'bank_sms'
@@ -193,7 +193,7 @@ def parse_and_save_transactions(parsed_records: list) -> dict:
             - source: 来源 (wechat/alipay/bank_sms/other)
             - merchant: 商户（可选）
             - category: 分类（可选）
-            - transaction_date: 日期（可选）
+            - transaction_date: 交易时间，必须为 YYYY-MM-DD HH:MM:SS 格式（可选，未提供则使用当前时间）
             - note: 备注（可选）
             - bank_name: 银行名称（可选，用于银行卡）
             - card_last_four: 卡号后四位（可选，用于银行卡）

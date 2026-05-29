@@ -279,9 +279,9 @@ def format_transactions_report(transactions: List[Dict]) -> str:
     """格式化收支记录列表"""
     lines = []
     lines.append("收支记录")
-    lines.append("=" * 70)
-    lines.append(f"{'日期':<12} {'类型':<6} {'金额':>12} {'商户':<15} {'分类':<8} {'备注'}")
-    lines.append("-" * 70)
+    lines.append("=" * 90)
+    lines.append(f"{'日期':<12} {'类型':<6} {'金额':>12} {'商户':<15} {'分类':<8} {'订单号':<20} {'备注'}")
+    lines.append("-" * 90)
     
     for t in transactions:
         date = t['transaction_date']
@@ -289,9 +289,10 @@ def format_transactions_report(transactions: List[Dict]) -> str:
         amount = format_currency(t['amount'])
         merchant = (t['merchant'] or '')[:12]
         category = get_category_name(t.get('category', 'other'))
+        order_no = (t.get('order_no') or '')[:18]
         note = (t['note'] or '')[:15]
         
-        lines.append(f"{date:<12} {type_text:<6} {amount:>12} {merchant:<15} {category:<8} {note}")
+        lines.append(f"{date:<12} {type_text:<6} {amount:>12} {merchant:<15} {category:<8} {order_no:<20} {note}")
     
     return '\n'.join(lines)
 

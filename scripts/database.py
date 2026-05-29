@@ -186,12 +186,19 @@ def init_database():
             category TEXT NOT NULL,
             transaction_date TEXT NOT NULL,
             note TEXT,
+            order_no TEXT,
             transfer_id INTEGER,
             created_at TEXT,
             FOREIGN KEY (account_id) REFERENCES accounts(id),
             FOREIGN KEY (transfer_id) REFERENCES transfers(id)
         )
     ''')
+
+    # 兼容旧表：如果 order_no 列不存在则添加
+    cursor.execute("PRAGMA table_info(transactions)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'order_no' not in columns:
+        cursor.execute('ALTER TABLE transactions ADD COLUMN order_no TEXT')
     
     # 创建转账记录表
     cursor.execute('''
@@ -420,7 +427,7 @@ def calculate_account_balance(account_id: int) -> float:
 
 def add_transaction(amount: float, transaction_type: str, account_id: int, 
                    category: str, transaction_date: str, merchant: str = None,
-                   note: str = None, transfer_id: int = None) -> int:
+                   note: str = None, order_no: str = None, transfer_id: int = None) -> int:
     """
     添加收支记录
     
@@ -429,20 +436,52 @@ def add_transaction(amount: float, transaction_type: str, account_id: int,
         transaction_type: income 或 expense
         account_id: 账户ID
         category: 分类
-        transaction_date: 交易日期 YYYY-MM-DD HH:MM:SS（精确到秒），未提供则使用创建时间
+        transaction_date: 交易日期，必须为 YYYY-MM-DD HH:MM:SS 格式（精确到秒），如 "2026-05-18 19:36:29"。
+                          图片识别时从图片提取（支付宝"交易时间"/微信"支付时间"），文字/语音录入时使用当前时间
         merchant: 商家
         note: 备注
+        order_no: 订单号/交易单号（**必填**）
+                  - 图片识别时：支付宝订单号或微信交易单号
+                  - 文字/语音录入时：当前时间戳，格式 YYYYMMDDHHmmss
+                  - ⚠️ **order_no 为空或缺失时将拒绝入库并抛出 ValueError**
         transfer_id: 转账关联ID
     
     Returns:
         新记录ID
+    
+    Raises:
+        ValueError: order_no 为空或缺失
     """
+    # 强制校验：order_no 必填
+    if not order_no or (isinstance(order_no, str) and order_no.strip() == ''):
+        raise ValueError(
+            '订单号(order_no)不能为空。图片识别时必须提取支付宝"订单号"或微信"交易单号"；'
+            '文字/语音录入时使用当前时间戳(YYYYMMDDHHmmss格式)。'
+            '如果图片中无此字段，请提示用户："图片信息不完整，请提供包含订单号/交易单号的完整截图"，并拒绝入库。'
+        )
+
+    order_no = order_no.strip()
+
+    # 强制校验：order_no 唯一性检查，防止重复录入
     conn = get_connection()
     cursor = conn.cursor()
+    cursor.execute(
+        'SELECT id, amount, merchant, transaction_date FROM transactions WHERE order_no = ? LIMIT 1',
+        (order_no,)
+    )
+    existing = cursor.fetchone()
+    if existing:
+        conn.close()
+        raise ValueError(
+            f'订单号 "{order_no}" 已存在（记录ID={existing[0]}，金额=¥{existing[1]:.2f}，'
+            f'商家={existing[2]}，交易时间={existing[3]}）。'
+            f'该笔消费明细已经登记，请勿重复保存。'
+        )
+    
     cursor.execute('''
-        INSERT INTO transactions (amount, transaction_type, account_id, merchant, category, transaction_date, note, transfer_id, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (round(amount, 2), transaction_type, account_id, merchant, category, transaction_date, note, transfer_id, get_local_now()))
+        INSERT INTO transactions (amount, transaction_type, account_id, merchant, category, transaction_date, note, order_no, transfer_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (round(amount, 2), transaction_type, account_id, merchant, category, transaction_date, note, order_no, transfer_id, get_local_now()))
     conn.commit()
     record_id = cursor.lastrowid
     conn.close()
@@ -458,7 +497,7 @@ def get_transactions(account_id: int = None, transaction_type: str = None,
     
     sql = '''
         SELECT t.id, t.amount, t.transaction_type, t.account_id, a.name as account_name,
-               t.merchant, t.category, t.transaction_date, t.note, t.transfer_id, t.created_at
+               t.merchant, t.category, t.transaction_date, t.note, t.order_no, t.transfer_id, t.created_at
         FROM transactions t
         JOIN accounts a ON t.account_id = a.id
         WHERE 1=1
@@ -499,8 +538,9 @@ def get_transactions(account_id: int = None, transaction_type: str = None,
             'category': row[6],
             'transaction_date': row[7],
             'note': row[8],
-            'transfer_id': row[9],
-            'created_at': row[10]
+            'order_no': row[9],
+            'transfer_id': row[10],
+            'created_at': row[11]
         }
         for row in rows
     ]
@@ -512,7 +552,7 @@ def get_transaction_by_id(transaction_id: int) -> Optional[Dict]:
     cursor = conn.cursor()
     cursor.execute('''
         SELECT t.id, t.amount, t.transaction_type, t.account_id, a.name as account_name,
-               t.merchant, t.category, t.transaction_date, t.note, t.transfer_id, t.created_at
+               t.merchant, t.category, t.transaction_date, t.note, t.order_no, t.transfer_id, t.created_at
         FROM transactions t
         JOIN accounts a ON t.account_id = a.id
         WHERE t.id = ?
@@ -531,15 +571,16 @@ def get_transaction_by_id(transaction_id: int) -> Optional[Dict]:
             'category': row[6],
             'transaction_date': row[7],
             'note': row[8],
-            'transfer_id': row[9],
-            'created_at': row[10]
+            'order_no': row[9],
+            'transfer_id': row[10],
+            'created_at': row[11]
         }
     return None
 
 
 def update_transaction(transaction_id: int, **kwargs) -> bool:
     """更新收支记录"""
-    allowed_fields = ['amount', 'transaction_type', 'account_id', 'merchant', 'category', 'transaction_date', 'note']
+    allowed_fields = ['amount', 'transaction_type', 'account_id', 'merchant', 'category', 'transaction_date', 'note', 'order_no']
     
     updates = []
     params = []
@@ -1127,12 +1168,13 @@ def get_detailed_report(date_from: str, date_to: str) -> Dict:
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # 查询收入记录
+    # 查询收入记录（LEFT JOIN 确保孤儿记录不丢失）
     cursor.execute("""
-        SELECT t.id, t.amount, t.account_id, a.name as account_name,
-               t.merchant, t.category, t.transaction_date, t.note
+        SELECT t.id, t.amount, t.account_id, 
+               COALESCE(a.name, '(已删除账户#' || t.account_id || ')') as account_name,
+               t.merchant, t.category, t.transaction_date, t.note, t.order_no
         FROM transactions t
-        JOIN accounts a ON t.account_id = a.id
+        LEFT JOIN accounts a ON t.account_id = a.id
         WHERE t.transaction_type = 'income'
           AND t.transaction_date >= ?
           AND t.transaction_date <= ?
@@ -1140,12 +1182,13 @@ def get_detailed_report(date_from: str, date_to: str) -> Dict:
     """, (date_from, date_to))
     income_records = [dict(row) for row in cursor.fetchall()]
 
-    # 查询支出记录
+    # 查询支出记录（LEFT JOIN 确保孤儿记录不丢失）
     cursor.execute("""
-        SELECT t.id, t.amount, t.account_id, a.name as account_name,
-               t.merchant, t.category, t.transaction_date, t.note
+        SELECT t.id, t.amount, t.account_id, 
+               COALESCE(a.name, '(已删除账户#' || t.account_id || ')') as account_name,
+               t.merchant, t.category, t.transaction_date, t.note, t.order_no
         FROM transactions t
-        JOIN accounts a ON t.account_id = a.id
+        LEFT JOIN accounts a ON t.account_id = a.id
         WHERE t.transaction_type = 'expense'
           AND t.transaction_date >= ?
           AND t.transaction_date <= ?
@@ -1153,11 +1196,12 @@ def get_detailed_report(date_from: str, date_to: str) -> Dict:
     """, (date_from, date_to))
     expense_records = [dict(row) for row in cursor.fetchall()]
 
-    # 支出按账户分组汇总
+    # 支出按账户分组汇总（LEFT JOIN 确保孤儿记录不丢失）
     cursor.execute("""
-        SELECT a.name as account_name, SUM(t.amount) as total, COUNT(*) as count
+        SELECT COALESCE(a.name, '(已删除账户#' || t.account_id || ')') as account_name, 
+               SUM(t.amount) as total, COUNT(*) as count
         FROM transactions t
-        JOIN accounts a ON t.account_id = a.id
+        LEFT JOIN accounts a ON t.account_id = a.id
         WHERE t.transaction_type = 'expense'
           AND t.transaction_date >= ?
           AND t.transaction_date <= ?
